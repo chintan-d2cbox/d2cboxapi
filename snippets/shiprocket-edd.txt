@@ -1,0 +1,271 @@
+/* ===== 1. Liquid code | pincode-checker.liquid ===== */
+{% comment %}
+  Shiprocket EDD — pincode checker block
+  Paste inside the product section's block loop, e.g.
+  {%- when 'pincode_checker' -%}
+{% endcomment %}
+
+<div class="pincode-checker" data-endpoint="{{ block.settings.endpoint }}" {{ block.shopify_attributes }}>
+  <div class="pincode-checker_header-title">{{ block.settings.title }}</div>
+  <form class="pincode-checker__row">
+    <div class="input">
+      <input
+        type="text"
+        id="pincode-input"
+        name="pincode"
+        inputmode="numeric"
+        pattern="[0-9]*"
+        maxlength="6"
+        class="input__field input__field--text"
+        placeholder="Enter Pincode"
+        autocomplete="postal-code">
+    </div>
+
+    <button type="button" class="pincode-checker__submit" disabled="disabled" is="loader-button">
+      <svg focusable="false" width="17" height="14" viewBox="0 0 17 14">
+        <path d="M0 7h15M9 1l6 6-6 6" stroke="currentColor" stroke-width="{{ settings.icon_stroke_width }}" fill="none"></path>
+      </svg>
+    </button>
+  </form>
+
+  <div class="pincode-checker__result text--small"></div>
+</div>
+
+<script src="{{ 'pincode-checker.js' | asset_url }}" defer></script>
+
+/* ===== 2. Schema code | block-schema.json ===== */
+{
+  "type": "pincode_checker",
+  "name": "Pincode checker",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Title",
+      "default": "Check delivery date"
+    },
+    {
+      "type": "text",
+      "id": "endpoint",
+      "label": "Cloudflare Worker URL",
+      "info": "e.g. https://store-edd.your-account.workers.dev/"
+    }
+  ]
+}
+
+/* ===== 3. Theme JS code | assets/pincode-checker.js ===== */
+/**
+ * Shiprocket EDD — pincode checker
+ * Endpoint comes from the block setting via data-endpoint, so this file is identical on every store.
+ */
+(() => {
+  const formatDate = (value) => {
+    // Parse YYYY-MM-DD manually to avoid timezone shifts; fall back to native parsing
+    const m = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    const date = m ? new Date(m[1], m[2] - 1, m[3]) : new Date(value);
+    if (isNaN(date)) return value;
+
+    const part = (opts) => date.toLocaleDateString('en-GB', opts);
+    return `${date.getDate()} ${part({ month: 'long' })} ${date.getFullYear()}`;
+  };
+
+  const check = async (checker) => {
+    const input = checker.querySelector('#pincode-input');
+    const button = checker.querySelector('.pincode-checker__submit');
+    const result = checker.querySelector('.pincode-checker__result');
+    const endpoint = checker.dataset.endpoint;
+    const pincode = input.value.trim();
+
+    if (!endpoint || pincode.length !== 6 || button.disabled) return;
+
+    const show = (type, message) => {
+      result.classList.remove('error', 'success');
+      result.classList.add(type);
+      result.innerHTML = message;
+    };
+
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    result.classList.remove('error', 'success');
+    result.innerHTML = '';
+
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pincode })
+      });
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.detail || data.error);
+
+      if (data.serviceable) {
+        show('success', `Estimated delivery by <strong>${formatDate(data.etd)}</strong>`);
+      } else {
+        show('error', `Delivery not available for this pincode ${pincode}`);
+      }
+    } catch (err) {
+      console.log(err);
+      show('error', 'Unable to check right now. Please try again.');
+    } finally {
+      button.disabled = false;
+      button.removeAttribute('aria-busy');
+    }
+  };
+
+  // Digits only, enable button at 6 digits
+  document.addEventListener('input', (e) => {
+    if (!e.target.matches('.pincode-checker #pincode-input')) return;
+
+    const input = e.target;
+    input.value = input.value.replace(/\D/g, '').slice(0, 6);
+    input.closest('.pincode-checker').querySelector('.pincode-checker__submit').disabled = input.value.length !== 6;
+  });
+
+  // Button click
+  document.addEventListener('click', (e) => {
+    const button = e.target.closest('.pincode-checker__submit');
+    if (button) check(button.closest('.pincode-checker'));
+  });
+
+  // Enter key (stops form from reloading the page)
+  document.addEventListener('submit', (e) => {
+    if (!e.target.matches('.pincode-checker__row')) return;
+    e.preventDefault();
+    check(e.target.closest('.pincode-checker'));
+  });
+})();
+
+/* ===== 4. Cloudflare API code | worker.js ===== */
+/**
+ * Shiprocket EDD proxy — Cloudflare Worker
+ *
+ * Cloudflare → Workers → Create → paste this → Settings → Variables and Secrets:
+ *
+ *   SR_EMAIL          (Secret)  Shiprocket API user email
+ *   SR_PASSWORD       (Secret)  Shiprocket API user password
+ *   ALLOWED_ORIGINS   (Text)    "https://store.com,https://www.store.com,https://store.myshopify.com"
+ *   PICKUP_PIN        (Text, optional)  auto-detected from Shiprocket if not set
+ *   DEFAULT_WEIGHT    (Text, optional)  kg, default 0.5
+ *
+ * Request:  POST { "pincode": "400001" }
+ * Response: { serviceable, etd, days, cod, courier }
+ */
+
+const SR_BASE = 'https://apiv2.shiprocket.in/v1/external';
+const TOKEN_TTL_MS = 9 * 24 * 60 * 60 * 1000; // token valid 10 days; refresh at 9
+const PICKUP_TTL_MS = 24 * 60 * 60 * 1000;
+
+// In-memory cache (per Worker instance)
+let tokenCache = { value: null, expires: 0 };
+let pickupCache = { value: null, expires: 0 };
+
+export default {
+  async fetch(request, env) {
+    const origin = request.headers.get('Origin') || '';
+    const allowed = (env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+    const corsOrigin = !allowed.length ? '*' : allowed.includes(origin) ? origin : allowed[0];
+
+    const cors = {
+      'Access-Control-Allow-Origin': corsOrigin,
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Vary': 'Origin'
+    };
+
+    const json = (body, status = 200) =>
+      new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
+
+    if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
+    if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+    if (allowed.length && !allowed.includes(origin)) return json({ error: 'Forbidden' }, 403);
+
+    let body;
+    try { body = await request.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
+
+    const pincode = String(body.pincode || '').trim();
+    if (!/^[1-9][0-9]{5}$/.test(pincode)) return json({ error: 'Invalid pincode' }, 400);
+
+    const weight = Number(body.weight) > 0 ? Number(body.weight) : Number(env.DEFAULT_WEIGHT || 0.5);
+    const cod = body.cod ? 1 : 0;
+
+    try {
+      return json(await checkServiceability(env, pincode, weight, cod));
+    } catch (err) {
+      return json({ error: 'Unable to check delivery right now', detail: err.message }, 502);
+    }
+  }
+};
+
+async function checkServiceability(env, pincode, weight, cod, retried = false) {
+  const token = await getToken(env, retried);
+  const pickupPin = env.PICKUP_PIN || await getPickupPin(token);
+
+  const url = new URL(`${SR_BASE}/courier/serviceability/`);
+  url.searchParams.set('pickup_postcode', pickupPin);
+  url.searchParams.set('delivery_postcode', pincode);
+  url.searchParams.set('weight', weight);
+  url.searchParams.set('cod', cod);
+
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+
+  // Token expired — log in again and retry once
+  if (res.status === 401 && !retried) return checkServiceability(env, pincode, weight, cod, true);
+
+  // 404 = no courier serves this pincode
+  if (res.status === 404) return { serviceable: false };
+  if (!res.ok) throw new Error(`Serviceability ${res.status}: ${await res.text()}`);
+
+  const payload = await res.json();
+  const couriers = payload?.data?.available_courier_companies || [];
+  if (!couriers.length) return { serviceable: false };
+
+  // Shiprocket's recommended courier, else the fastest
+  const recommendedId = payload.data.recommended_courier_company_id;
+  const courier =
+    couriers.find(c => c.courier_company_id === recommendedId) ||
+    couriers.slice().sort((a, b) => Number(a.estimated_delivery_days) - Number(b.estimated_delivery_days))[0];
+
+  return {
+    serviceable: true,
+    etd: courier.etd || null,
+    days: Number(courier.estimated_delivery_days) || null,
+    cod: couriers.some(c => Number(c.cod) === 1),
+    courier: courier.courier_name
+  };
+}
+
+async function getPickupPin(token) {
+  if (pickupCache.value && Date.now() < pickupCache.expires) return pickupCache.value;
+
+  const res = await fetch(`${SR_BASE}/settings/company/pickup`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!res.ok) throw new Error(`Pickup ${res.status}: ${await res.text()}`);
+
+  const payload = await res.json();
+  const locations = payload?.data?.shipping_address || [];
+  const location = locations.find(l => Number(l.is_primary_location) === 1) || locations[0];
+  if (!location?.pin_code) throw new Error('No pickup location in Shiprocket');
+
+  pickupCache = { value: String(location.pin_code), expires: Date.now() + PICKUP_TTL_MS };
+  return pickupCache.value;
+}
+
+async function getToken(env, forceRefresh = false) {
+  if (!forceRefresh && tokenCache.value && Date.now() < tokenCache.expires) return tokenCache.value;
+
+  const res = await fetch(`${SR_BASE}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: env.SR_EMAIL, password: env.SR_PASSWORD })
+  });
+  if (!res.ok) throw new Error(`Login ${res.status}: ${await res.text()}`);
+
+  const { token } = await res.json();
+  if (!token) throw new Error('Login returned no token');
+
+  tokenCache = { value: token, expires: Date.now() + TOKEN_TTL_MS };
+  return token;
+}
