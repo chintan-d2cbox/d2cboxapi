@@ -1,4 +1,13 @@
-/* ===== Liquid Code | Paste inside the product section where the block should render ===== */
+// ======================================================================
+// FEATURE: Shiprocket EDD
+// Pincode checker showing estimated delivery date via Shiprocket.
+// ======================================================================
+
+
+// ======================================================================
+// TAB:   Liquid Code
+// PASTE: Paste inside the product section where the block should render
+// ======================================================================
 {% comment %}
   Shiprocket EDD — pincode checker block
   Paste inside the product section's block loop, e.g.
@@ -33,7 +42,10 @@
 
 <script src="{{ 'pincode-checker.js' | asset_url }}" defer></script>
 
-/* ===== Section Schema | Add inside the section schema "blocks": [ ] ===== */
+// ======================================================================
+// TAB:   Section Schema
+// PASTE: Add inside the section schema "blocks": [ ]
+// ======================================================================
 {
   "type": "pincode_checker",
   "name": "Pincode checker",
@@ -54,7 +66,10 @@
   ]
 }
 
-/* ===== Theme JavaScript | Create assets/pincode-checker.js in the theme and paste this ===== */
+// ======================================================================
+// TAB:   Theme JavaScript
+// PASTE: Create assets/pincode-checker.js in the theme and paste this
+// ======================================================================
 /**
  * Shiprocket EDD — pincode checker
  * Endpoint comes from the block setting via data-endpoint, so this file is identical on every store.
@@ -137,7 +152,10 @@
   });
 })();
 
-/* ===== Cloudflare API | Cloudflare → Workers → Create Worker → paste this, then add the variables listed at the top ===== */
+// ======================================================================
+// TAB:   Cloudflare API
+// PASTE: Cloudflare → Workers → Create Worker → paste this, then add the variables listed at the top
+// ======================================================================
 /**
  * Shiprocket EDD proxy — Cloudflare Worker
  *
