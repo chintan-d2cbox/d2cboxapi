@@ -15,164 +15,136 @@
 
   <!-- Top bar -->
   <header class="h-11 shrink-0 flex items-center gap-3 px-4 bg-[#010409] border-b border-white/10">
-    <button id="menu" class="md:hidden text-gray-400 hover:text-white" aria-label="Toggle explorer">☰</button>
+    <button id="menu" class="md:hidden text-gray-400 hover:text-white" aria-label="Toggle menu">☰</button>
     <span class="font-semibold text-white">D2CBox <span class="text-sky-400">API</span></span>
   </header>
 
   <div class="flex flex-1 min-h-0 relative">
 
-    <!-- Explorer -->
-    <aside id="explorer" class="hidden md:flex absolute md:static inset-y-0 left-0 z-20 w-64 shrink-0 flex-col bg-[#161b22] border-r border-white/10">
-      <div class="px-4 py-2 text-[11px] font-semibold tracking-wider text-gray-500 uppercase">Explorer</div>
-      <nav id="tree" class="flex-1 overflow-y-auto pb-4 select-none"></nav>
+    <!-- Features (left) -->
+    <aside id="sidebar" class="hidden md:flex absolute md:static inset-y-0 left-0 z-20 w-60 shrink-0 flex-col bg-[#161b22] border-r border-white/10">
+      <div class="px-4 py-2 text-[11px] font-semibold tracking-wider text-gray-500 uppercase">Features</div>
+      <nav id="features" class="flex-1 overflow-y-auto pb-4"></nav>
     </aside>
 
-    <!-- Editor -->
+    <!-- Code (right) -->
     <main class="flex-1 min-w-0 flex flex-col">
-      <div class="h-10 shrink-0 flex items-end bg-[#010409] border-b border-white/10">
-        <div id="tab" class="h-full hidden items-center gap-2 px-4 bg-[#0d1117] border-t-2 border-sky-400 text-white"></div>
+      <nav id="tabs" class="h-10 shrink-0 flex items-end overflow-x-auto bg-[#010409] border-b border-white/10"></nav>
+
+      <div class="min-h-9 shrink-0 flex items-center justify-between gap-3 px-4 py-1.5 border-b border-white/5">
+        <div id="hint" class="text-xs text-gray-400"></div>
+        <button id="copy" class="shrink-0 px-3 py-1 rounded bg-sky-500/15 text-sky-300 hover:bg-sky-500/25 text-xs font-medium">Copy</button>
       </div>
 
-      <div class="h-9 shrink-0 flex items-center justify-between gap-3 px-4 border-b border-white/5">
-        <div id="crumb" class="truncate text-xs text-gray-500"></div>
-        <button id="copy" class="hidden shrink-0 px-3 py-1 rounded bg-sky-500/15 text-sky-300 hover:bg-sky-500/25 text-xs font-medium">Copy</button>
-      </div>
-
-      <div id="editor" class="flex-1 overflow-auto font-mono text-[13px] leading-6">
-        <div class="h-full flex items-center justify-center text-gray-600">Select a file from the explorer</div>
-      </div>
+      <div id="editor" class="flex-1 overflow-auto font-mono text-[13px] leading-6"></div>
     </main>
   </div>
 
   <script>
     /**
-     * Add a new integration:
-     * 1. Create snippets/<name>.txt with sections:  /* ===== 1. Title | filename.ext ===== *\/
+     * Add a new feature:
+     * 1. Create snippets/<name>.txt with sections:  /* ===== Tab Name | Where to paste ===== *\/
      * 2. Add one line below.
      */
-    const SNIPPETS = [
+    const FEATURES = [
       { title: 'Shiprocket EDD', file: 'snippets/shiprocket-edd.txt' }
     ];
 
-    const ICONS = {
-      liquid: '<span class="text-emerald-400">◆</span>',
-      json: '<span class="text-yellow-300">{}</span>',
-      js: '<span class="text-yellow-400 font-bold text-[10px]">JS</span>'
-    };
-    const LANGS = { liquid: 'xml', json: 'json', js: 'javascript' };
-
     const $ = (id) => document.getElementById(id);
-    const ext = (name) => name.split('.').pop();
     const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-    const escapeHtml = (s) => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
     let data = [];
-    let current = null;
+    let current = { fi: 0, ti: 0 };
 
-    // Split one snippet file into its sections
+    // Split one feature file into tabs
     const parse = (text) => {
       const parts = text.split(/^\/\* =+ (.+?) =+ \*\/[ \t]*$/m);
-      const sections = [];
+      const tabs = [];
       for (let i = 1; i < parts.length; i += 2) {
-        const [label, name] = parts[i].split('|').map(s => s.trim());
-        sections.push({ label, name: name || label, code: parts[i + 1].replace(/^\n+|\s+$/g, '') });
+        const [name, hint = ''] = parts[i].split('|').map(s => s.trim());
+        tabs.push({ name, hint, code: parts[i + 1].replace(/^\n+|\s+$/g, '') });
       }
-      return sections;
+      return tabs;
     };
 
-    const renderTree = () => {
-      $('tree').innerHTML = data.map((s, si) => `
-        <div>
-          <button data-folder="${si}" class="w-full flex items-center gap-1.5 px-2 py-1 text-left text-gray-200 hover:bg-white/5">
-            <span class="w-3 text-gray-500 text-[10px]">${s.open ? '▼' : '▶'}</span>
-            <span class="font-medium">${s.title}</span>
-          </button>
-          <div class="${s.open ? '' : 'hidden'}">
-            ${s.sections.map((f, fi) => {
-              const active = current && current.si === si && current.fi === fi;
-              return `
-                <button data-file="${si}:${fi}" title="${f.label}"
-                  class="w-full flex items-center gap-2 pl-8 pr-2 py-1 text-left truncate ${active ? 'bg-sky-500/15 text-white' : 'text-gray-400 hover:bg-white/5 hover:text-gray-200'}">
-                  <span class="w-4 text-center shrink-0">${ICONS[ext(f.name)] || '•'}</span>
-                  <span class="truncate">${f.name}</span>
-                </button>`;
-            }).join('')}
-          </div>
-        </div>
+    const render = () => {
+      const feature = data[current.fi];
+      const tab = feature.tabs[current.ti];
+
+      // Left: feature names
+      $('features').innerHTML = data.map((f, i) => `
+        <button data-feature="${i}" class="w-full px-4 py-2 text-left ${i === current.fi ? 'bg-sky-500/15 text-white border-l-2 border-sky-400' : 'text-gray-400 border-l-2 border-transparent hover:bg-white/5 hover:text-gray-200'}">
+          ${f.title}
+        </button>
       `).join('');
-    };
 
-    const open = (si, fi) => {
-      const snippet = data[si];
-      const file = snippet?.sections[fi];
-      if (!file) return;
+      // Top: tabs
+      $('tabs').innerHTML = feature.tabs.map((t, i) => `
+        <button data-tab="${i}" class="h-full shrink-0 px-5 border-r border-white/10 whitespace-nowrap ${i === current.ti ? 'bg-[#0d1117] text-white border-t-2 border-t-sky-400' : 'text-gray-500 hover:text-gray-300'}">
+          ${t.name}
+        </button>
+      `).join('');
 
-      current = { si, fi };
-      snippet.open = true;
-
-      const lang = LANGS[ext(file.name)];
-      const html = lang ? hljs.highlight(file.code, { language: lang }).value : escapeHtml(file.code);
-      const lines = file.code.split('\n').length;
-
-      $('tab').innerHTML = `${ICONS[ext(file.name)] || ''}<span>${file.name}</span>`;
-      $('tab').classList.replace('hidden', 'flex');
-      $('crumb').textContent = `${snippet.title}  ›  ${file.label}`;
-      $('copy').classList.remove('hidden');
+      // Hint + code
+      $('hint').textContent = tab.hint;
+      const html = hljs.highlightAuto(tab.code, ['xml', 'json', 'javascript']).value;
+      const lines = tab.code.split('\n').length;
 
       $('editor').innerHTML = `
         <div class="flex min-w-max py-3">
-          <pre class="sticky left-0 shrink-0 pl-4 pr-4 text-right text-gray-600 bg-[#0d1117] select-none">${Array.from({ length: lines }, (_, i) => i + 1).join('\n')}</pre>
+          <pre class="sticky left-0 shrink-0 px-4 text-right text-gray-600 bg-[#0d1117] select-none">${Array.from({ length: lines }, (_, i) => i + 1).join('\n')}</pre>
           <pre class="pr-8"><code class="hljs">${html}</code></pre>
         </div>`;
       $('editor').scrollTop = 0;
 
-      history.replaceState(null, '', `#${slug(snippet.title)}/${fi + 1}`);
-      renderTree();
-      if (innerWidth < 768) {
-        $('explorer').classList.add('hidden');
-        $('explorer').classList.remove('flex');
-      }
+      history.replaceState(null, '', `#${slug(feature.title)}/${slug(tab.name)}`);
+    };
+
+    const closeSidebar = () => {
+      if (innerWidth >= 768) return;
+      $('sidebar').classList.add('hidden');
+      $('sidebar').classList.remove('flex');
     };
 
     // Events
-    $('tree').addEventListener('click', (e) => {
-      const folder = e.target.closest('[data-folder]');
-      const file = e.target.closest('[data-file]');
+    $('features').addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-feature]');
+      if (!btn) return;
+      current = { fi: Number(btn.dataset.feature), ti: 0 };
+      render();
+      closeSidebar();
+    });
 
-      if (folder) {
-        const s = data[folder.dataset.folder];
-        s.open = !s.open;
-        renderTree();
-      }
-      if (file) {
-        const [si, fi] = file.dataset.file.split(':').map(Number);
-        open(si, fi);
-      }
+    $('tabs').addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-tab]');
+      if (!btn) return;
+      current.ti = Number(btn.dataset.tab);
+      render();
     });
 
     $('copy').addEventListener('click', async () => {
-      if (!current) return;
-      await navigator.clipboard.writeText(data[current.si].sections[current.fi].code);
+      await navigator.clipboard.writeText(data[current.fi].tabs[current.ti].code);
       $('copy').textContent = 'Copied';
       setTimeout(() => ($('copy').textContent = 'Copy'), 1500);
     });
 
     $('menu').addEventListener('click', () => {
-      $('explorer').classList.toggle('hidden');
-      $('explorer').classList.toggle('flex');
+      $('sidebar').classList.toggle('hidden');
+      $('sidebar').classList.toggle('flex');
     });
 
     // Init
     (async () => {
-      data = await Promise.all(SNIPPETS.map(async (s) => ({
-        ...s,
-        open: false,
-        sections: parse(await (await fetch(s.file)).text())
+      data = await Promise.all(FEATURES.map(async (f) => ({
+        ...f,
+        tabs: parse(await (await fetch(f.file)).text())
       })));
 
-      const [hashSlug, hashFile] = location.hash.slice(1).split('/');
-      const si = Math.max(0, data.findIndex(s => slug(s.title) === hashSlug));
-      open(si, Math.max(0, Number(hashFile || 1) - 1));
+      const [hashFeature, hashTab] = location.hash.slice(1).split('/');
+      const fi = Math.max(0, data.findIndex(f => slug(f.title) === hashFeature));
+      const ti = Math.max(0, data[fi].tabs.findIndex(t => slug(t.name) === hashTab));
+      current = { fi, ti };
+      render();
     })();
   </script>
 </body>
