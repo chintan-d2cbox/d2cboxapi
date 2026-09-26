@@ -1,0 +1,13 @@
+{
+  "type": "pincode_checker",
+  "name": "Pincode checker",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Title",
+      "default": "Check delivery date"
+    }
+  ]
+}

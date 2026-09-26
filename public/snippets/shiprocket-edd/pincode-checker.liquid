@@ -1,0 +1,27 @@
+<div class="pincode-checker">
+  <div class="pincode-checker_header-title">{{ block.settings.title }}</div>
+  <form class="pincode-checker__row">
+    <div class="input">
+      <input
+        type="text"
+        id="pincode-input"
+        name="pincode"
+        inputmode="numeric"
+        pattern="[0-9]*"
+        maxlength="6"
+        class="input__field input__field--text"
+        placeholder="Enter Pincode"
+        autocomplete="postal-code">
+    </div>
+
+    <button type="button" class="pincode-checker__submit" disabled="disabled" is="loader-button">
+      <svg focusable="false" width="17" height="14" viewBox="0 0 17 14">
+        <path d="M0 7h15M9 1l6 6-6 6" stroke="currentColor" stroke-width="{{ settings.icon_stroke_width }}" fill="none"></path>
+      </svg>
+    </button>
+  </form>
+
+  <div class="pincode-checker__result text--small"></div>
+</div>
+
+<script src="{{ 'pincode-checker.js' | asset_url }}" defer></script>
