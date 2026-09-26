@@ -1,3 +1,11 @@
 node_modules
 .vercel
 .env*
+
+
+
+# cd ~/Desktop/d2cboxapi-repo
+# cp ~/Downloads/goswift-edd.js features/
+# git add -A
+# git commit -m "Add GoSwift EDD"
+# git push
